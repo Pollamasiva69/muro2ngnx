@@ -1,0 +1,77 @@
+[package]
+name = "ml-threat-detection"
+version = "1.0.0"
+edition = "2021"
+authors = ["Security Team <security@yourdomain.com>"]
+description = "High-performance ML-based threat detection service for Nginx"
+
+[dependencies]
+# Web framework - Actix-web for high performance
+actix-web = "4.4"
+actix-rt = "2.9"
+actix-cors = "0.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Redis client
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Logging
+env_logger = "0.11"
+log = "0.4"
+
+# Machine Learning
+# Using smartcore for pure Rust ML (can be replaced with linfa or onnxruntime)
+smartcore = "0.3"
+
+# HTTP client (for external API calls if needed)
+reqwest = { version = "0.11", features = ["json"] }
+
+# Date/Time
+chrono = "0.4"
+
+# Configuration
+config = "0.13"
+dotenv = "0.15"
+
+# Metrics
+prometheus = "0.13"
+lazy_static = "1.4"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Hashing (for JA3 fingerprinting)
+md5 = "0.7"
+sha2 = "0.10"
+
+# IP address handling
+ipnetwork = "0.20"
+
+# Rate limiting
+governor = "0.6"
+
+# GeoIP (optional, for geolocation features)
+maxminddb = "0.23"
+
+# CPU detection
+num_cpus = "1.16"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[[bin]]
+name = "ml-service"
+path = "src/main.rs"

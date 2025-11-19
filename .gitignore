@@ -1,0 +1,62 @@
+# Environment
+.env
+*.local
+
+# SSL Certificates
+ssl/*.pem
+ssl/*.key
+ssl/*.crt
+
+# Logs
+*.log
+logs/
+nginx/logs/
+
+# Docker
+.docker/
+
+# Build artifacts
+target/
+ml-service/target/
+*.rdb
+*.aof
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Backup files
+*.bak
+*.backup
+
+# Database
+*.db
+*.sqlite
+clickhouse-data/
+redis-data/
+
+# Models
+ml-service/models/*.bin
+ml-service/models/*.pkl
+
+# Cache
+cache/
+.cache/
+
+# Node modules (if dashboard uses Node)
+node_modules/
+dashboard/frontend/node_modules/
+dashboard/frontend/build/
+dashboard/frontend/dist/

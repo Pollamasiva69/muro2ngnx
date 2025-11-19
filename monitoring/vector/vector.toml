@@ -1,0 +1,37 @@
+# ==============================================================================
+# Vector Configuration - Log aggregation and routing
+# ==============================================================================
+
+[sources.nginx_logs]
+type = "file"
+include = ["/var/log/nginx/access.log"]
+read_from = "end"
+data_dir = "/var/lib/vector"
+
+[transforms.parse_json]
+type = "remap"
+inputs = ["nginx_logs"]
+source = '''
+. = parse_json!(.message)
+.timestamp = parse_timestamp!(.timestamp, "%+")
+.client_ip = parse_ipv4!(.client_ip)
+.status = to_int!(.status)
+.response_time = to_float!(.response_time)
+.threat_score = to_int!(.threat_score)
+.blocked = .blocked == "true"
+'''
+
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["parse_json"]
+endpoint = "http://clickhouse:8123"
+database = "security"
+table = "http_logs"
+compression = "gzip"
+batch.max_bytes = 1048576
+batch.timeout_secs = 10
+
+[sinks.console]
+type = "console"
+inputs = ["parse_json"]
+encoding.codec = "json"

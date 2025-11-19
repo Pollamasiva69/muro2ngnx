@@ -1,0 +1,228 @@
+# ==============================================================================
+# DOCKER COMPOSE - Complete production deployment
+# ==============================================================================
+
+version: '3.8'
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  redis-net:
+    driver: bridge
+
+volumes:
+  nginx-cache:
+  nginx-logs:
+  redis-data-1:
+  redis-data-2:
+  redis-data-3:
+  clickhouse-data:
+  ml-models:
+  certbot-conf:
+  certbot-www:
+
+services:
+  # ===========================================================================
+  # NGINX + ModSecurity - Main reverse proxy
+  # ===========================================================================
+  nginx-proxy:
+    image: owasp/modsecurity-crs:nginx-alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8443:8443"  # Dashboard
+    volumes:
+      - ./nginx/conf/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf/sites-available:/etc/nginx/sites-available:ro
+      - ./nginx/lua:/etc/nginx/lua:ro
+      - ./nginx/modsecurity:/etc/nginx/modsecurity:ro
+      - nginx-cache:/var/cache/nginx
+      - nginx-logs:/var/log/nginx
+      - certbot-conf:/etc/nginx/ssl:ro
+      - certbot-www:/var/www/certbot:ro
+    networks:
+      - frontend
+      - backend
+    environment:
+      - REDIS_HOST=redis-master-1
+      - REDIS_PORT=6379
+    depends_on:
+      - redis-master-1
+      - ml-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ===========================================================================
+  # ML Threat Detection Service (Rust)
+  # ===========================================================================
+  ml-service:
+    build:
+      context: ../../ml-service
+      dockerfile: ../deployment/docker/Dockerfile.ml-service
+    container_name: ml-service
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      - ml-models:/app/models
+    networks:
+      - backend
+      - redis-net
+    environment:
+      - RUST_LOG=info
+      - BIND_ADDR=0.0.0.0:9000
+      - REDIS_URL=redis://redis-master-1:6379
+      - MODEL_PATH=/app/models/classifier.bin
+    depends_on:
+      - redis-master-1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ===========================================================================
+  # Redis Cluster - 3 Masters
+  # ===========================================================================
+  redis-master-1:
+    image: redis:7-alpine
+    container_name: redis-master-1
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+      - "16379:16379"
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data-1:/data
+    networks:
+      - redis-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  redis-master-2:
+    image: redis:7-alpine
+    container_name: redis-master-2
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "6380:6379"
+      - "16380:16379"
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data-2:/data
+    networks:
+      - redis-net
+
+  redis-master-3:
+    image: redis:7-alpine
+    container_name: redis-master-3
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "6381:6379"
+      - "16381:16379"
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data-3:/data
+    networks:
+      - redis-net
+
+  # ===========================================================================
+  # ClickHouse - Analytics Database
+  # ===========================================================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"
+      - "9123:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./database/clickhouse/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
+      - ./database/schemas:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+
+  # ===========================================================================
+  # Vector - Log aggregation
+  # ===========================================================================
+  vector:
+    image: timberio/vector:latest-alpine
+    container_name: vector
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/vector/vector.toml:/etc/vector/vector.toml:ro
+      - nginx-logs:/var/log/nginx:ro
+    networks:
+      - backend
+    depends_on:
+      - clickhouse
+
+  # ===========================================================================
+  # Grafana - Visualization
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - backend
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=changeme
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+
+  # ===========================================================================
+  # Prometheus - Metrics collection
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - backend
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+
+  # ===========================================================================
+  # Certbot - SSL Certificate Management
+  # ===========================================================================
+  certbot:
+    image: certbot/certbot:latest
+    container_name: certbot
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
